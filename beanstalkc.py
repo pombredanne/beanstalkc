@@ -2,7 +2,7 @@
 """beanstalkc - A beanstalkd Client Library for Python"""
 
 __license__ = '''
-Copyright (C) 2008-2011 Andreas Bolka
+Copyright (C) 2008-2014 Andreas Bolka
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 '''
 
-__version__ = '0.2.0'
+__version__ = '0.4.0'
 
 import logging
 import socket
@@ -25,7 +25,7 @@ import socket
 
 DEFAULT_HOST = 'localhost'
 DEFAULT_PORT = 11300
-DEFAULT_PRIORITY = 2**31
+DEFAULT_PRIORITY = 2 ** 31
 DEFAULT_TTR = 120
 
 
@@ -36,11 +36,11 @@ class DeadlineSoon(BeanstalkcException): pass
 
 class SocketError(BeanstalkcException):
     @staticmethod
-    def wrap(fn, *args, **kwargs):
+    def wrap(wrapped_function, *args, **kwargs):
         try:
-            return fn(*args, **kwargs)
-        except socket.error, e:
-            raise SocketError(e)
+            return wrapped_function(*args, **kwargs)
+        except socket.error, err:
+            raise SocketError(err)
 
 
 class Connection(object):
@@ -52,11 +52,17 @@ class Connection(object):
             except ImportError:
                 logging.error('Failed to load PyYAML, will not parse YAML')
                 parse_yaml = False
-        self._connect_timeout= connect_timeout
+        self._connect_timeout = connect_timeout
         self._parse_yaml = parse_yaml or (lambda x: x)
         self.host = host
         self.port = port
         self.connect()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def connect(self):
         """Connect to beanstalkd server."""
@@ -70,9 +76,17 @@ class Connection(object):
         """Close connection to server."""
         try:
             self._socket.sendall('quit\r\n')
+        except socket.error:
+            pass
+        try:
             self._socket.close()
         except socket.error:
             pass
+
+    def reconnect(self):
+        """Re-connect to server."""
+        self.close()
+        self.connect()
 
     def _interact(self, command, expected_ok, expected_err=[]):
         SocketError.wrap(self._socket.sendall, command)
@@ -93,7 +107,7 @@ class Connection(object):
 
     def _read_body(self, size):
         body = SocketError.wrap(self._socket_file.read, size)
-        SocketError.wrap(self._socket_file.read, 2) # trailing crlf
+        SocketError.wrap(self._socket_file.read, 2)  # trailing crlf
         if size > 0 and not body:
             raise SocketError()
         return body
@@ -114,7 +128,7 @@ class Connection(object):
     def _interact_peek(self, command):
         try:
             return self._interact_job(command, ['FOUND'], ['NOT_FOUND'], False)
-        except CommandFailed, (_, status, results):
+        except CommandFailed, (_, _status, _results):
             return None
 
     # -- public interface --
@@ -122,10 +136,10 @@ class Connection(object):
     def put(self, body, priority=DEFAULT_PRIORITY, delay=0, ttr=DEFAULT_TTR):
         """Put a job into the current tube. Returns job id."""
         assert isinstance(body, str), 'Job body must be a str instance'
-        jid = self._interact_value(
-                'put %d %d %d %d\r\n%s\r\n' %
-                    (priority, delay, ttr, len(body), body),
-                ['INSERTED', 'BURIED'], ['JOB_TOO_BIG'])
+        jid = self._interact_value('put %d %d %d %d\r\n%s\r\n' % (
+                                       priority, delay, ttr, len(body), body),
+                                   ['INSERTED'],
+                                   ['JOB_TOO_BIG', 'BURIED', 'DRAINING'])
         return int(jid)
 
     def reserve(self, timeout=None):
@@ -149,6 +163,10 @@ class Connection(object):
         """Kick at most bound jobs into the ready queue."""
         return int(self._interact_value('kick %d\r\n' % bound, ['KICKED']))
 
+    def kick_job(self, jid):
+        """Kick a specific job into the ready queue."""
+        self._interact('kick-job %d\r\n' % jid, ['KICKED'], ['NOT_FOUND'])
+
     def peek(self, jid):
         """Peek at a job. Returns a Job, or None."""
         return self._interact_peek('peek %d\r\n' % jid)
@@ -170,7 +188,7 @@ class Connection(object):
         return self._interact_yaml('list-tubes\r\n', ['OK'])
 
     def using(self):
-        """Return a list of all tubes currently being used."""
+        """Return the tube currently being used."""
         return self._interact_value('list-tube-used\r\n', ['USING'])
 
     def use(self, name):
@@ -201,12 +219,12 @@ class Connection(object):
     def stats_tube(self, name):
         """Return a dict of stats about a given tube."""
         return self._interact_yaml('stats-tube %s\r\n' % name,
-                                  ['OK'],
-                                  ['NOT_FOUND'])
+                                   ['OK'],
+                                   ['NOT_FOUND'])
 
     def pause_tube(self, name, delay):
         """Pause a tube for a given delay time, in seconds."""
-        self._interact('pause-tube %s %d\r\n' %(name, delay),
+        self._interact('pause-tube %s %d\r\n' % (name, delay),
                        ['PAUSED'],
                        ['NOT_FOUND'])
 
@@ -272,6 +290,10 @@ class Job(object):
             self.conn.bury(self.jid, priority or self._priority())
             self.reserved = False
 
+    def kick(self):
+        """Kick this job alive."""
+        self.conn.kick_job(self.jid)
+
     def touch(self):
         """Touch this reserved job, requesting more time to work on it before
         it expires."""
@@ -284,12 +306,5 @@ class Job(object):
 
 
 if __name__ == '__main__':
-    import doctest, os, signal
-    try:
-        pid = os.spawnlp(os.P_NOWAIT,
-                         'beanstalkd',
-                         'beanstalkd', '-l', '127.0.0.1', '-p', '14711')
-        doctest.testfile('TUTORIAL.mkd', optionflags=doctest.ELLIPSIS)
-        doctest.testfile('test/no-yaml.doctest', optionflags=doctest.ELLIPSIS)
-    finally:
-        os.kill(pid, signal.SIGTERM)
+    import nose
+    nose.main(argv=['nosetests', '-c', '.nose.cfg'])

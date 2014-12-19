@@ -1,16 +1,14 @@
 #!/usr/bin/env python
 import os
 from setuptools import setup
-from beanstalkc import __version__ as version
 
-pkg_version = version
-git_version = os.popen('git describe --tags --abbrev=6').read().strip()[7:]
-if git_version:
-    pkg_version += '.dev' + git_version
+from beanstalkc import __version__ as src_version
+
+PKG_VERSION = os.environ.get('BEANSTALKC_PKG_VERSION', src_version)
 
 setup(
     name='beanstalkc',
-    version=pkg_version,
+    version=PKG_VERSION,
     py_modules=['beanstalkc'],
 
     author='Andreas Bolka',
@@ -28,6 +26,7 @@ workqueue service.
         'Intended Audience :: Developers',
         'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python',
+        'Operating System :: OS Independent',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
 )

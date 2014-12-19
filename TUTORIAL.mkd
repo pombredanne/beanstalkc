@@ -26,7 +26,8 @@ If we leave out the `host` and/or `port` parameters, `'localhost'` and `11300`
 would be used as defaults, respectively. There is also a `connect_timeout`
 parameter which determines how long, in seconds, the socket will wait for the
 server to respond to its initial connection attempt. If it is `None`, then
-there will be no timeout; it defaults to 1.
+there will be no timeout; it defaults to the result of your system's
+`socket.getdefaulttimeout()`.
 
 
 Basic Operation
@@ -172,7 +173,7 @@ So let's create another job:
 Now we retrieve job-level statistics:
 
     >>> from pprint import pprint
-    >>> pprint(job.stats())
+    >>> pprint(job.stats())                         # doctest: +ELLIPSIS
     {'age': 0,
      ...
      'id': 2,
@@ -185,14 +186,14 @@ If you try to access job stats after the job was deleted, you'll get a
 `CommandFailed` exception:
 
     >>> job.delete()
-    >>> job.stats()
+    >>> job.stats()                                 # doctest: +ELLIPSIS
     Traceback (most recent call last):
     ...
     CommandFailed: ('stats-job', 'NOT_FOUND', [])
 
 Let's have a look at some numbers for the `'default'` tube:
 
-    >>> pprint(beanstalk.stats_tube('default'))
+    >>> pprint(beanstalk.stats_tube('default'))     # doctest: +ELLIPSIS
     {...
      'current-jobs-ready': 0,
      'current-jobs-reserved': 0,
@@ -204,7 +205,7 @@ Let's have a look at some numbers for the `'default'` tube:
 Finally, there's an abundant amount of server-level statistics accessible via
 the `Connection`'s `stats` method. We won't go into details here, but:
 
-    >>> pprint(beanstalk.stats())
+    >>> pprint(beanstalk.stats())                   # doctest: +ELLIPSIS
     {...
      'current-connections': 1,
      'current-jobs-buried': 0,
@@ -300,6 +301,19 @@ tell you how many jobs were actually kicked alive again:
     >>> beanstalk.kick(42)
     0
 
+If you still have a handle to a job (or know its job ID), you can also kick
+alive this particular job, overriding the FIFO operation of the burial queue:
+
+    >>> job = beanstalk.reserve()
+    >>> job.bury()
+    >>> job.stats()['state']
+    'buried'
+    >>> job.kick()
+    >>> job.stats()['state']
+    'ready'
+
+(NOTE: The `kick-job` command was introduced in beanstalkd v1.8.)
+
 
 Inspecting Jobs
 ---------------
@@ -343,7 +357,7 @@ requests on unreserved jobs are silently ignored:
 You can, though, delete a job that was not reserved by you:
 
     >>> job.delete()
-    >>> job.stats()
+    >>> job.stats()                                 # doctest: +ELLIPSIS
     Traceback (most recent call last):
     ...
     CommandFailed: ('stats-job', 'NOT_FOUND', [])
@@ -444,7 +458,7 @@ when creating the `Connection`:
     >>> beanstalk.tubes()
     '---\n- default\n'
 
-    >>> beanstalk.stats_tube('default')
+    >>> beanstalk.stats_tube('default')             # doctest: +ELLIPSIS
     '---\nname: default\ncurrent-jobs-urgent: 0\ncurrent-jobs-ready: 0\n...'
 
     >>> beanstalk.close()
@@ -462,7 +476,7 @@ Alternatively, you can also pass a function to be used as YAML parser:
     >>> beanstalk.tubes()
     ['---', '- default', '']
 
-    >>> beanstalk.stats_tube('default')
+    >>> beanstalk.stats_tube('default')             # doctest: +ELLIPSIS
     ['---', 'name: default', 'current-jobs-urgent: 0', ...]
 
     >>> beanstalk.close()
